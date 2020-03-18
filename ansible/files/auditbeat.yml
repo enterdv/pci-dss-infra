@@ -1,0 +1,86 @@
+auditbeat.modules:
+
+  - module: auditd
+    audit_rules: |
+      #authentication events
+      -a always,exclude -F msgtype=USER_LOGIN
+      -a always,exclude -F msgtype=USER_AUTH
+      -a always,exclude -F msgtype=CRED_REFR
+      -a always,exclude -F msgtype=CRED_DISP
+      -a always,exclude -F msgtype=USER_ACCT
+      -a always,exclude -F msgtype=CRED_ACQ
+      -a always,exclude -F msgtype=USER_END
+      -a always,exclude -F msgtype=USER_START
+      -a always,exclude -F msgtype=AVC
+      -a never,exit -F exit=-ENOENT
+      ##user actions
+      #with sudo
+      -w /usr/bin/sudo -p x -k RUN_WITH_SUDO
+      #admin actions
+      -a always,exit -S execve -F uid=0 -F euid=0 -F auid>=1000 -F auid!=4294967295 -k ADMIN_ACTION
+      ##some critical events
+      #time change
+      -a always,exit -S adjtimex -S settimeofday -S clock_settime -F perm=wa -k CHANGE_TIME
+      #hostname change
+      -a always,exit -S sethostname -S setdomainname -k CHANGE_SYSTEM_NAME
+      #process change
+      -a always,exit -S ptrace -k PROCESS_INJECTION
+      #account change (or read)
+      -w /etc/group -p wa -k CHANGE_OR_READ_ACCOUNT_DATA
+      -w /etc/passwd -p wa -k CHANGE_OR_READ_ACCOUNT_DATA
+      -w /etc/gshadow -p wa -k CHANGE_OR_READ_ACCOUNT_DATA
+      -w /etc/shadow -p wa -k CHANGE_OR_READ_ACCOUNT_DATA
+      #sudoers change (or read)
+      -w /etc/sudoers -p wa -k CHANGE_OR_READ_SUDOERS
+      -w /etc/sudoers.d/ -p wa -k CHANGE_OR_READ_SUDOERS
+      #machine shutdown
+      -w /sbin/shutdown -p x -k POWER_STATE
+      -w /sbin/poweroff -p x -k POWER_STATE
+      -w /sbin/reboot -p x -k POWER_STATE
+      -w /sbin/halt -p x -k POWER_STATE
+      #work with kernel modules
+      -w /sbin/insmod -p x -k CHANGE_KERNEL_MODULES
+      -w /sbin/rmmod -p x -k CHANGE_KERNEL_MODULES
+      -w /sbin/modprobe -p x -k CHANGE_KERNEL_MODULES
+      -a always,exit -S init_module -S delete_module -k CHANGE_KERNEL_MODULES
+      #permissions change
+      -a always,exit -S chmod -S chown -S fchown -S fchownat -S lchown -F auid>=1000 -F auid!=4294967295 -k FILE_PERMISSION
+      -a always,exit -S setxattr -S lsetxattr -S fsetxattr -S removexattr -S lremovexattr -S fremovexattr -F auid>=1000 -F auid!=4294967295 -k FILE_PERMISSION
+      ##
+      #unsuccessful access
+      -a always,exit -S all -F exit=-EPERM -F auid>=1000 -F auid!=4294967295 -k UNSUCCESSFUL_ACCESS
+      -a always,exit -S all -F exit=-EACCES -F auid>=1000 -F auid!=4294967295 -k UNSUCCESSFUL_ACCESS
+    processors:
+      - drop_event:
+          when:
+            and:
+              - equals:
+                  auditd.data.tty: "(none)"
+              - equals:
+                  user.euid: "0"
+      - drop_event:
+          when:
+            and:
+              - equals:
+                  auditd.summary.actor.secondary: "nginx"
+              - equals:
+                  auditd.summary.actor.primary: "unset"
+
+  - module: file_integrity
+    paths:
+      - /bin
+      - /usr/bin
+      - /sbin
+      - /usr/sbin
+      - /etc
+
+    recursive: true
+
+setup.template.overwrite: false
+
+output.file:
+  path: "/var/log/auditbeat"
+  filename: audit.log
+  rotate_every_kb: 10000
+  number_of_files: 7
+  permissions: 0600

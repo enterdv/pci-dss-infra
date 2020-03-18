@@ -1,0 +1,184 @@
+# Bootstrap Ubuntu
+- hosts: all
+  remote_user: ubuntu
+  gather_facts: no
+  become: yes
+  tasks:
+    - name: Install python-minimal
+      raw: test -e /usr/bin/python || (apt -y update && apt install -y python-minimal)
+
+# Install base soft
+- hosts: all
+  remote_user: ubuntu
+  gather_facts: no
+  become: yes
+  tasks:
+    - name: Update and upgrade Ubuntu packages
+      apt:
+        upgrade: yes
+        update_cache: yes
+        force_apt_get: yes
+
+    - name: Install software
+      apt:
+        name: "{{ item }}"
+        state: latest
+        update_cache: yes
+        force_apt_get: yes
+      loop:
+        - software-properties-common
+        - python-apt
+        - unzip
+        - vim
+        - htop
+        - atop
+        - iotop
+        - iftop
+  # For build naxsi
+        - git
+        - build-essential
+        - bzip2
+        - libpcre3-dev
+        - libssl-dev
+        - daemon
+        - libgeoip-dev
+        - wget
+        - zlib1g-dev
+
+# Install nginx from official repository
+- hosts: nginx
+  remote_user: ubuntu
+  become: yes
+  gather_facts: yes
+  roles:
+    - { role: nginxinc.nginx, tags: nginx }
+
+# Ubuntu Hardening
+- hosts: all
+  remote_user: ubuntu
+  gather_facts: no
+  become: yes
+  tasks:
+
+    - name: Configure systemd-timesyncd service
+      lineinfile:
+        path: /etc/systemd/timesyncd.conf
+        insertafter: '^#NTP='
+        line: NTP=169.254.169.123
+      register: timesyncd
+
+    - name: Restart systemd-timesyncd service
+      systemd:
+        name: systemd-timesyncd
+        state: restarted
+      when: timesyncd.changed
+
+    - name: Shell timeout
+      blockinfile:
+        path: /etc/profile.d/autologout.sh
+        create: yes
+        block: |
+          TMOUT=600
+          readonly TMOUT
+          export TMOUT
+
+    - name: Grant file execution
+      file:
+        path: /etc/profile.d/autologout.sh
+        mode: 0755
+
+    - name: Change default umask
+      blockinfile:
+        path: /etc/profile.d/change_umask.sh
+        create: yes
+        block: |
+          umask 027
+
+    - name: Grant file execution
+      file:
+        path: /etc/profile.d/change_umask.sh
+        mode: 0755
+
+    - name: Configure sshd service
+      template:
+        dest: /etc/ssh/sshd_config
+        src: files/sshd_config
+      register: sshd_restart
+
+    - name: Restart sshd service
+      systemd:
+        name: sshd
+        state: restarted
+      when: sshd_restart.changed
+
+# Install and configure auditbeat
+- hosts: all
+  remote_user: ubuntu
+  gather_facts: no
+  become: yes
+  tags: auditbeat
+  tasks:
+    - name: Add repository key
+      apt_key:
+        url: https://artifacts.elastic.co/GPG-KEY-elasticsearch
+        state: present
+    - name: Add elastic repositiry
+      apt_repository:
+        repo: deb https://artifacts.elastic.co/packages/6.x/apt stable main
+        state: present
+        filename: elastic
+    - name: Install auditbeat
+      apt:
+        name: auditbeat
+        state: present
+        force_apt_get: yes
+    - name: Configure auditbeat
+      template:
+        dest: /etc/auditbeat/auditbeat.yml
+        src: files/auditbeat.yml
+      register: auditbeat_restart
+    - name: Restart auditbeat service
+      systemd:
+        name: auditbeat
+        state: restarted
+      when: auditbeat_restart.changed
+
+# Install php7.2 for app
+- hosts: app
+  remote_user: ubuntu
+  gather_facts: no
+  become: yes
+  tags: php
+  tasks:
+    - name: Install php packages
+      apt:
+        name: "{{ item }}"
+        state: latest
+        update_cache: yes
+        force_apt_get: yes
+      loop:
+        - php7.2
+        - php7.2-fpm
+        - php7.2-mysql
+        - php7.2-cli
+
+# Install and Configure CloudWatch agent
+- hosts: all
+  remote_user: ubuntu
+  gather_facts: no
+  become: yes
+  tags: cloudwatch
+  tasks:
+    - name: Install CloudWatch agent
+      apt:
+        force_apt_get: yes
+        deb: https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+    - name: Configure CloudWatch agent
+      template:
+        dest: /opt/aws/amazon-cloudwatch-agent/bin/config.json
+        src: files/cloudwatch_config.json
+      register: cloudwatch_restart
+    - name: Restart CloudWatch service
+      shell:
+        cmd: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/bin/config.json -s
+      when: cloudwatch_restart.changed

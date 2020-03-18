@@ -1,0 +1,30 @@
+# common
+keys/
+logs/
+log/
+log
+logs
+
+key
+key.pub
+bastion
+bastion.pub
+
+# python
+.python-version
+__pycache__
+
+# terraform
+.terraform/
+.terragrunt-cache
+
+# ansible
+*.retry
+
+# Idea
+.idea
+
+_*.sh
+*.zip
+
+*_key*

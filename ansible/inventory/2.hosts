@@ -1,0 +1,8 @@
+[all]
+bastion
+public-nginx
+app
+
+[nginx]
+public-nginx
+app
